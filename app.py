@@ -249,7 +249,7 @@ st.title("🩺 Glucose Dashboard")
 st.write("Analyze glucose readings categorized by time of day (Fasting vs PPBS)")
 
 # CSV file path
-csv_file = '/Users/richaanuragini/Documents/Rishi/glucoscan_streamlit/output_with_glucose copy.csv'
+csv_file = os.path.join(os.path.dirname(__file__), 'output_with_glucose copy.csv')
 
 # Check for CSV file changes and auto-rerun
 check_csv_changes(csv_file)
