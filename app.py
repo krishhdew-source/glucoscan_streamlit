@@ -44,21 +44,21 @@ def check_csv_changes(csv_file_path):
 # ===============================
 # Data Processing Functions
 # ===============================
-def load_and_categorize_glucose_data(csv_file_path):
+def load_and_process_glucose_data(csv_file_path):
     """
-    Load glucose data from CSV and categorize by time of day.
+    Load glucose data from CSV, which is already categorized.
     
     Args:
         csv_file_path: Path to the CSV file with glucose readings
         
     Returns:
-        pandas DataFrame: Data with 'category' and 'datetime' columns added
+        pandas DataFrame: Data with 'datetime' column added and sorted
     """
     try:
         df = pd.read_csv(csv_file_path)
         
-        if 'time' not in df.columns or 'date' not in df.columns:
-            st.error("CSV missing 'date' or 'time' columns")
+        if 'time' not in df.columns or 'date' not in df.columns or 'category' not in df.columns:
+            st.error("CSV missing 'date', 'time', or 'category' columns")
             return None
         
         # Convert glucose_reading to numeric, handling errors
@@ -67,19 +67,13 @@ def load_and_categorize_glucose_data(csv_file_path):
         # Filter out rows with non-numeric glucose readings
         df = df.dropna(subset=['glucose_reading'])
         
-        # Combine date and time into datetime column
-        df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'], format='%Y-%m-%d %H:%M:%S')
-        
-        # Categorize based on time
-        def categorize_time(time_str):
-            try:
-                time_obj = datetime.strptime(str(time_str).strip(), "%H:%M:%S").time()
-                nine_am = datetime.strptime("09:30:00", "%H:%M:%S").time()
-                return "Fasting" if time_obj < nine_am else "PPBS"
-            except:
-                return None
-        
-        df['category'] = df['time'].apply(categorize_time)
+        # Combine date and time into datetime column, handling potential errors
+        df['datetime'] = pd.to_datetime(
+            df['date'] + ' ' + df['time'], 
+            format='%Y-%m-%d %H:%M:%S',
+            errors='coerce'
+        )
+        df = df.dropna(subset=['datetime'])
         
         # Sort by datetime
         df = df.sort_values('datetime').reset_index(drop=True)
@@ -94,159 +88,61 @@ def load_and_categorize_glucose_data(csv_file_path):
         return None
 
 
-def create_glucose_chart(df):
+def create_category_chart(df, category_name, color):
     """
-    Create an interactive chart showing glucose readings over time with categories.
+    Create a chart for a specific glucose category.
     
     Args:
-        df: DataFrame with glucose readings and category
+        df: DataFrame with all glucose data
+        category_name: The category to plot (e.g., "Fasting")
+        color: The color for the chart line
         
     Returns:
         plotly figure object
     """
-    fig = go.Figure()
-    
-    # Add Fasting readings
-    fasting_data = df[df['category'] == 'Fasting']
-    if len(fasting_data) > 0:
-        fig.add_trace(go.Scatter(
-            x=fasting_data['datetime'],
-            y=fasting_data['glucose_reading'],
-            mode='lines+markers',
-            name='Fasting (Before 9 AM)',
-            line=dict(color='#1f77b4', width=2),
-            marker=dict(size=8)
-        ))
-    
-    # Add PPBS readings
-    ppbs_data = df[df['category'] == 'PPBS']
-    if len(ppbs_data) > 0:
-        fig.add_trace(go.Scatter(
-            x=ppbs_data['datetime'],
-            y=ppbs_data['glucose_reading'],
-            mode='lines+markers',
-            name='PPBS (9 AM onwards)',
-            line=dict(color='#ff7f0e', width=2),
-            marker=dict(size=8)
-        ))
-    
-    fig.update_layout(
-        title='Glucose Readings Over Time',
-        xaxis_title='Date & Time',
-        yaxis_title='Glucose Reading (mg/dL)',
-        hovermode='x unified',
-        height=500,
-        template='plotly_white'
-    )
-    
-    return fig
-
-
-def create_fasting_chart(df):
-    """
-    Create a chart showing only fasting readings (before 9 AM) over time.
-    
-    Args:
-        df: DataFrame with glucose readings and category
-        
-    Returns:
-        plotly figure object
-    """
-    fasting_data = df[df['category'] == 'Fasting'].copy()
+    category_data = df[df['category'] == category_name].copy()
     
     fig = go.Figure()
     
-    if len(fasting_data) > 0:
+    if not category_data.empty:
         fig.add_trace(go.Scatter(
-            x=fasting_data['datetime'],
-            y=fasting_data['glucose_reading'],
+            x=category_data['datetime'],
+            y=category_data['glucose_reading'],
             mode='lines+markers',
-            name='Fasting',
-            line=dict(color='#1f77b4', width=3),
-            marker=dict(size=10, symbol='circle'),
+            name=category_name,
+            line=dict(color=color, width=3),
+            marker=dict(size=10),
             fill='tozeroy',
-            fillcolor='rgba(31, 119, 180, 0.2)'
+            fillcolor=f'rgba({",".join(str(c) for c in px.colors.hex_to_rgb(color))}, 0.2)'
         ))
         
         # Add average line
-        avg_glucose = fasting_data['glucose_reading'].mean()
+        avg_glucose = category_data['glucose_reading'].mean()
         fig.add_hline(
             y=avg_glucose,
             line_dash="dash",
             line_color="red",
-            annotation_text=f"Average: {avg_glucose:.1f} mg/dL",
-            annotation_position="right"
+            annotation_text=f"Average: {avg_glucose:.1f}",
+            annotation_position="bottom right"
         )
     
     fig.update_layout(
-        title='Fasting Glucose Readings (Before 9 AM)',
+        title=f'{category_name} Readings',
         xaxis_title='Date & Time',
-        yaxis_title='Glucose Reading (mg/dL)',
+        yaxis_title='Glucose (mg/dL)',
         hovermode='x unified',
         height=400,
         template='plotly_white'
     )
     
     return fig
-
-
-def create_ppbs_chart(df):
-    """
-    Create a chart showing only PPBS readings (9 AM onwards) over time.
-    
-    Args:
-        df: DataFrame with glucose readings and category
-        
-    Returns:
-        plotly figure object
-    """
-    ppbs_data = df[df['category'] == 'PPBS'].copy()
-    
-    fig = go.Figure()
-    
-    if len(ppbs_data) > 0:
-        fig.add_trace(go.Scatter(
-            x=ppbs_data['datetime'],
-            y=ppbs_data['glucose_reading'],
-            mode='lines+markers',
-            name='PPBS',
-            line=dict(color='#ff7f0e', width=3),
-            marker=dict(size=10, symbol='diamond'),
-            fill='tozeroy',
-            fillcolor='rgba(255, 127, 14, 0.2)'
-        ))
-        
-        # Add average line
-        avg_glucose = ppbs_data['glucose_reading'].mean()
-        fig.add_hline(
-            y=avg_glucose,
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"Average: {avg_glucose:.1f} mg/dL",
-            annotation_position="right"
-        )
-    
-    fig.update_layout(
-        title='PPBS Glucose Readings (9 AM onwards)',
-        xaxis_title='Date & Time',
-        yaxis_title='Glucose Reading (mg/dL)',
-        hovermode='x unified',
-        height=400,
-        template='plotly_white'
-    )
-    
-    return fig
-
-
-
-
 
 
 # ===============================
 # UI Layout
 # ===============================
 st.title("🩺 Glucose Dashboard")
-st.write("Analyze glucose readings categorized by time of day (Fasting vs PPBS)")
+st.write("Analyze glucose readings categorized by meal times.")
 
 # CSV file path
 csv_file = os.path.join(os.path.dirname(__file__), 'output_with_glucose copy.csv')
@@ -256,71 +152,79 @@ check_csv_changes(csv_file)
 
 # Load data
 if os.path.exists(csv_file):
-    df = load_and_categorize_glucose_data(csv_file)
+    df = load_and_process_glucose_data(csv_file)
     
-    if df is not None and len(df) > 0:
-        # Display statistics
-        st.divider()
-        col1, col2, col3, col4 = st.columns(4)
+    if df is not None and not df.empty:
+        # Define categories and their colors for consistent plotting
+        category_config = {
+            "Fasting": "#1f77b4",
+            "Post-Breakfast": "#ff7f0e",
+            "Pre-Dinner": "#2ca02c",
+            "Post-Dinner": "#d62728",
+            "Random": "#9467bd",
+            "PPBS": "#e377c2",  # Added PPBS for backward compatibility
+            "Uncategorized": "#8c564b"
+        }
         
-        with col1:
+        # Get a sorted list of categories present in the data
+        categories_in_data = sorted([cat for cat in df['category'].unique() if cat in category_config])
+
+        # Display summary metrics
+        st.divider()
+        st.subheader("📊 Summary Statistics")
+        
+        # Use columns for metrics, dynamically create them
+        metric_cols = st.columns(len(categories_in_data) + 1)
+        with metric_cols[0]:
             st.metric("Total Readings", len(df))
         
-        with col2:
-            fasting_count = len(df[df['category'] == 'Fasting'])
-            st.metric("Fasting Readings", fasting_count)
-        
-        with col3:
-            ppbs_count = len(df[df['category'] == 'PPBS'])
-            st.metric("PPBS Readings", ppbs_count)
-        
-        with col4:
-            avg_glucose = df['glucose_reading'].mean()
-            st.metric("Average Reading (mg/dL)", f"{avg_glucose:.1f}")
-        
+        for i, category in enumerate(categories_in_data):
+            with metric_cols[i+1]:
+                count = len(df[df['category'] == category])
+                st.metric(f"{category} Readings", count)
+
         st.divider()
+
+        # Display charts and data for each category
+        st.subheader("📈 Category Analysis")
         
-        # Display separate category charts
-        st.subheader("📈 Separate Category Charts")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            fig_fasting = create_fasting_chart(df)
-            st.plotly_chart(fig_fasting, use_container_width=True)
-        
-        with col2:
-            fig_ppbs = create_ppbs_chart(df)
-            st.plotly_chart(fig_ppbs, use_container_width=True)
-        
-        st.divider()
-        
-        # Display category statistics
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📈 Fasting Readings")
-            fasting_df = df[df['category'] == 'Fasting'][['datetime', 'glucose_reading']]
-            if len(fasting_df) > 0:
-                st.dataframe(fasting_df, use_container_width=True)
-                st.write(f"**Average:** {fasting_df['glucose_reading'].mean():.1f} mg/dL")
-                st.write(f"**Range:** {fasting_df['glucose_reading'].min():.0f} - {fasting_df['glucose_reading'].max():.0f} mg/dL")
-            else:
-                st.info("No fasting readings available")
-        
-        with col2:
-            st.subheader("📉 PPBS Readings")
-            ppbs_df = df[df['category'] == 'PPBS'][['datetime', 'glucose_reading']]
-            if len(ppbs_df) > 0:
-                st.dataframe(ppbs_df, use_container_width=True)
-                st.write(f"**Average:** {ppbs_df['glucose_reading'].mean():.1f} mg/dL")
-                st.write(f"**Range:** {ppbs_df['glucose_reading'].min():.0f} - {ppbs_df['glucose_reading'].max():.0f} mg/dL")
-            else:
-                st.info("No PPBS readings available")
-        
-        st.divider()
-        
+        for i in range(0, len(categories_in_data), 2):
+            col1, col2 = st.columns(2)
+            
+            # Display chart and data for the first category in the row
+            with col1:
+                category1 = categories_in_data[i]
+                color1 = category_config.get(category1, "#000000")
+                
+                st.plotly_chart(create_category_chart(df, category1, color1), use_container_width=True)
+                
+                category_df1 = df[df['category'] == category1][['datetime', 'glucose_reading']]
+                if not category_df1.empty:
+                    st.dataframe(category_df1.style.format({'datetime': '{:%Y-%m-%d %H:%M:%S}'}), use_container_width=True)
+                    st.write(f"**Average:** {category_df1['glucose_reading'].mean():.1f} mg/dL")
+                    st.write(f"**Range:** {category_df1['glucose_reading'].min():.0f} - {category_df1['glucose_reading'].max():.0f} mg/dL")
+                else:
+                    st.info(f"No readings for {category1}")
+
+            # Display chart and data for the second category in the row, if it exists
+            if i + 1 < len(categories_in_data):
+                with col2:
+                    category2 = categories_in_data[i+1]
+                    color2 = category_config.get(category2, "#000000")
+
+                    st.plotly_chart(create_category_chart(df, category2, color2), use_container_width=True)
+                    
+                    category_df2 = df[df['category'] == category2][['datetime', 'glucose_reading']]
+                    if not category_df2.empty:
+                        st.dataframe(category_df2.style.format({'datetime': '{:%Y-%m-%d %H:%M:%S}'}), use_container_width=True)
+                        st.write(f"**Average:** {category_df2['glucose_reading'].mean():.1f} mg/dL")
+                        st.write(f"**Range:** {category_df2['glucose_reading'].min():.0f} - {category_df2['glucose_reading'].max():.0f} mg/dL")
+                    else:
+                        st.info(f"No readings for {category2}")
+            st.divider()
+
         # Category comparison chart
-        st.subheader("📊 Category Comparison")
+        st.subheader("📊 Overall Category Comparison")
         category_stats = df.groupby('category')['glucose_reading'].agg(['mean', 'min', 'max', 'count']).round(1)
         
         fig_bar = go.Figure()
@@ -328,7 +232,7 @@ if os.path.exists(csv_file):
             x=category_stats.index,
             y=category_stats['mean'],
             name='Average Reading',
-            marker=dict(color=['#1f77b4', '#ff7f0e'])
+            marker_color=[category_config.get(cat, "#000000") for cat in category_stats.index]
         ))
         
         fig_bar.update_layout(
@@ -345,6 +249,8 @@ if os.path.exists(csv_file):
         st.divider()
         
         # Download processed data
+        if 'filename' not in df.columns:
+            df['filename'] = 'N/A'
         csv_download = df[['date', 'time', 'glucose_reading', 'category', 'filename']].to_csv(index=False)
         st.download_button(
             label="Download Categorized Data (CSV)",
@@ -358,3 +264,4 @@ if os.path.exists(csv_file):
 
 else:
     st.error(f"CSV file not found at:\n{csv_file}\n\nPlease ensure the file exists.")
+

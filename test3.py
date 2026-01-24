@@ -11,6 +11,7 @@ import google.generativeai as genai
 from PIL import ImageOps, ExifTags, Image
 import PIL
 import json
+import shutil
 
 
 # Try to add HEIC support
@@ -506,8 +507,11 @@ def categorize_glucose_readings(csv_file_path):
         pandas DataFrame: Original data with added 'category' column
         
     Categorization:
-        - "Fasting": Readings taken before 9:00 AM
-        - "PPBS": Readings taken at 9:00 AM or later (Post Prandial Blood Sugar)
+        - "Fasting": Readings taken before 9:30 AM
+        - "Post-Breakfast": Readings from 9:30 AM to 1:00 PM
+        - "Pre-Dinner": Readings from 7:00 PM to 9:00 PM
+        - "Post-Dinner": Readings taken after 9:00 PM
+        - "Random": Readings between 1:00 PM and 7:00 PM
     """
     try:
         df = pd.read_csv(csv_file_path)
@@ -519,30 +523,41 @@ def categorize_glucose_readings(csv_file_path):
         def categorize_time(time_str):
             """Helper function to categorize reading based on time"""
             if pd.isna(time_str):
-                return None
+                return "Uncategorized"
             
             try:
                 # Parse time string (format: HH:MM:SS)
                 time_obj = datetime.strptime(str(time_str).strip(), "%H:%M:%S").time()
                 
-                # Compare with 9:30 AM
-                nine_thirty_am = datetime.strptime("09:30:00", "%H:%M:%S").time()
-                
-                if time_obj < nine_thirty_am:
+                # Define time cutoffs for categorization
+                morning_fasting_end = datetime.strptime("09:30:00", "%H:%M:%S").time()
+                post_breakfast_end = datetime.strptime("13:00:00", "%H:%M:%S").time()
+                pre_dinner_start = datetime.strptime("19:00:00", "%H:%M:%S").time()
+                post_dinner_start = datetime.strptime("21:00:00", "%H:%M:%S").time()
+
+                if time_obj < morning_fasting_end:
                     return "Fasting"
+                elif time_obj < post_breakfast_end:
+                    return "Post-Breakfast"
+                elif time_obj >= pre_dinner_start and time_obj < post_dinner_start:
+                    return "Pre-Dinner"
+                elif time_obj >= post_dinner_start:
+                    return "Post-Dinner"
                 else:
-                    return "PPBS"
+                    return "Random" # Covers afternoon readings between breakfast and dinner
             except Exception as e:
                 print(f"Warning: Could not parse time '{time_str}': {e}")
-                return None
+                return "Uncategorized"
         
         # Apply categorization
         df['category'] = df['time'].apply(categorize_time)
         
         print(f"\n✅ Categorized readings:")
-        print(f"  Fasting (before 9:30 AM): {len(df[df['category'] == 'Fasting'])}")
-        print(f"  PPBS (9:30 AM onwards): {len(df[df['category'] == 'PPBS'])}")
-        print(f"  Uncategorized (no time): {len(df[df['category'].isna()])}")
+        categories = ["Fasting", "Post-Breakfast", "Pre-Dinner", "Post-Dinner", "Random", "Uncategorized"]
+        for category in categories:
+            count = len(df[df['category'] == category])
+            if count > 0:
+                print(f"  {category}: {count}")
         
         return df
     
@@ -555,15 +570,18 @@ def categorize_glucose_readings(csv_file_path):
 
 
 # Example usage for categorizing readings
-
 csv_file = csv_file_to_read
 if os.path.exists(csv_file):
+    # Create a backup copy of the original file
+    backup_file = csv_file.replace('.csv', '_backup.csv')
+    shutil.copy(csv_file, backup_file)
+    print(f"\nCreated a backup of the original file at: {backup_file}")
+
     df_categorized = categorize_glucose_readings(csv_file)
     if df_categorized is not None:
-        print("\nCategorized Data:")
-        print(df_categorized[['filename', 'time', 'glucose_reading', 'category']])
+        print("\nCategorized Data (last 5 rows):")
+        print(df_categorized[['filename', 'time', 'glucose_reading', 'category']].tail())
         
-        # Optionally save to a new CSV
-        categorized_file = csv_file
-        df_categorized.to_csv(categorized_file, index=False)
-        print(f"\n✅ Categorized data saved to {categorized_file}")
+        # Save the updated data back to the original file
+        df_categorized.to_csv(csv_file, index=False)
+        print(f"\n✅ Categorized data saved to {csv_file}")
